@@ -17,11 +17,15 @@ public:
 
     void close();
     void receive();
+    
+    // Replace this mailbox's scheduler. Effectively allows a mailbox to be
+    // created on one thread and moved to another one.
+    void setScheduler(Scheduler* scheduler_);
 
     static void maybeReceive(std::weak_ptr<Mailbox>);
 
 private:
-    Scheduler& scheduler;
+    Scheduler* scheduler;
 
     std::recursive_mutex receivingMutex;
     std::mutex pushingMutex;

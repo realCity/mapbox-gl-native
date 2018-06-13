@@ -19,6 +19,11 @@
 namespace mbgl {
 namespace util {
 
+class NoopScheduler : public Scheduler {
+public:
+    void schedule(std::weak_ptr<Mailbox>) override {}
+};
+
 // Manages a thread with `Object`.
 
 // Upon creation of this object, it launches a thread and creates an object of type `Object`
@@ -41,23 +46,37 @@ class Thread : public Scheduler {
 public:
     template <class... Args>
     Thread(const std::string& name, Args&&... args) {
-        std::promise<void> running;
+        std::unique_ptr<std::promise<void>> running_ = std::make_unique<std::promise<void>>();
+        running = running_->get_future();
+        
+        // Pre-create a mailbox for this actor, using a NoopScheduler that
+        // leaves the mailbox's queue unconsumed.
+        // Once the RunLoop on the target thread has been created, we'll replace
+        // the NoopScheduler with the RunLoop. Meanwhile, this allows us to
+        // immediately provide ActorRef using this mailbox, with any messages
+        // sent to them being queued in the holding mailbox until the thread is
+        // up and running.
+        std::shared_ptr<Mailbox> mailbox_ = std::make_shared<Mailbox>(noopScheduler);
+        mailbox = mailbox_;
 
-        thread = std::thread([&] {
+        thread = std::thread([&, sharedMailbox = std::move(mailbox_), runningPromise = std::move(running_)] {
             platform::setCurrentThreadName(name);
             platform::makeThreadLowPriority();
 
             util::RunLoop loop_(util::RunLoop::Type::New);
             loop = &loop_;
 
-            object = std::make_unique<Actor<Object>>(*this, std::forward<Args>(args)...);
-            running.set_value();
+            Actor<Object>* actor = new (&actorStorage) Actor<Object>(std::move(sharedMailbox), std::forward<Args>(args)...);
 
+            // Replace the NoopScheduler on the mailbox with the RunLoop to
+            // begin actually processing messages.
+            actor->mailbox->setScheduler(this);
+
+            runningPromise->set_value();
+            
             loop->run();
             loop = nullptr;
         });
-
-        running.get_future().get();
     }
 
     ~Thread() override {
@@ -66,12 +85,14 @@ public:
         }
 
         std::promise<void> joinable;
+        
+        running.wait();
 
         // Kill the actor, so we don't get more
         // messages posted on this scheduler after
         // we delete the RunLoop.
         loop->invoke([&] {
-            object.reset();
+            reinterpret_cast<const Actor<Object>*>(&actorStorage)->~Actor<Object>();
             joinable.set_value();
         });
 
@@ -85,8 +106,15 @@ public:
     // can be used to send messages to `Object`. It is safe
     // to the non-owning reference to outlive this object
     // and be used after the `Thread<>` gets destroyed.
-    ActorRef<std::decay_t<Object>> actor() const {
-        return object->self();
+    ActorRef<std::decay_t<Object>> actor() {
+        // The actor->object reference we provide here will not actually be
+        // valid until the child thread constructs Actor<Object> into
+        // actorStorage using "placement new".
+        // We guarantee that the object reference isn't actually used by
+        // using the NoopScheduler to prevent messages to this mailbox from
+        // being processed until after the actor has been constructed.
+        auto actor = reinterpret_cast<Actor<Object>*>(&actorStorage);
+        return ActorRef<std::decay_t<Object>>(actor->object, mailbox);
     }
 
     // Pauses the `Object` thread. It will prevent the object to wake
@@ -102,6 +130,8 @@ public:
         resumed = std::make_unique<std::promise<void>>();
 
         auto pausing = paused->get_future();
+
+        running.wait();
 
         loop->invoke(RunLoop::Priority::High, [this] {
             auto resuming = resumed->get_future();
@@ -127,13 +157,19 @@ public:
 private:
     MBGL_STORE_THREAD(tid);
 
-    void schedule(std::weak_ptr<Mailbox> mailbox) override {
-        loop->schedule(mailbox);
+    void schedule(std::weak_ptr<Mailbox> mailbox_) override {
+        assert(loop);
+        loop->schedule(mailbox_);
     }
 
-    std::thread thread;
-    std::unique_ptr<Actor<Object>> object;
+    NoopScheduler noopScheduler;
+    std::weak_ptr<Mailbox> mailbox;
+    std::aligned_storage<sizeof(Actor<Object>)> actorStorage;
 
+    std::thread thread;
+
+    std::future<void> running;
+    
     std::unique_ptr<std::promise<void>> paused;
     std::unique_ptr<std::promise<void>> resumed;
 

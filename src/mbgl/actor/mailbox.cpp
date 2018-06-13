@@ -7,7 +7,7 @@
 namespace mbgl {
 
 Mailbox::Mailbox(Scheduler& scheduler_)
-    : scheduler(scheduler_) {
+    : scheduler(&scheduler_) {
 }
 
 void Mailbox::close() {
@@ -22,6 +22,22 @@ void Mailbox::close() {
     closed = true;
 }
 
+void Mailbox::setScheduler(Scheduler* scheduler_) {
+    std::lock_guard<std::recursive_mutex> receivingLock(receivingMutex);
+    std::lock_guard<std::mutex> pushingLock(pushingMutex);
+    
+    scheduler = scheduler_;
+    
+    if (closed) {
+        return;
+    }
+    
+    if (!queue.empty()) {
+        scheduler->schedule(shared_from_this());
+    }
+}
+
+
 void Mailbox::push(std::unique_ptr<Message> message) {
     std::lock_guard<std::mutex> pushingLock(pushingMutex);
 
@@ -33,7 +49,7 @@ void Mailbox::push(std::unique_ptr<Message> message) {
     bool wasEmpty = queue.empty();
     queue.push(std::move(message));
     if (wasEmpty) {
-        scheduler.schedule(shared_from_this());
+        scheduler->schedule(shared_from_this());
     }
 }
 
@@ -58,7 +74,7 @@ void Mailbox::receive() {
     (*message)();
 
     if (!wasEmpty) {
-        scheduler.schedule(shared_from_this());
+        scheduler->schedule(shared_from_this());
     }
 }
 

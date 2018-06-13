@@ -11,6 +11,11 @@
 
 namespace mbgl {
 
+namespace util {
+    template <typename O>
+    class Thread;
+}
+
 /*
     An `Actor<O>` is an owning reference to an asynchronous object of type `O`: an "actor".
     Communication with an actor happens via message passing: you send a message to the object
@@ -56,10 +61,21 @@ public:
               object(self(), std::forward<Args>(args_)...) {
     }
 
+    template <typename U = Object, class... Args, typename std::enable_if<std::is_constructible<U, ActorRef<U>, Args...>::value>::type * = nullptr>
+    Actor(std::shared_ptr<Mailbox> mailbox_, Args&&... args_)
+            : mailbox(std::move(mailbox_)),
+              object(self(), std::forward<Args>(args_)...) {
+    }
+
     // Enabled for plain Objects
     template<typename U = Object, class... Args, typename std::enable_if<!std::is_constructible<U, ActorRef<U>, Args...>::value>::type * = nullptr>
     Actor(Scheduler& scheduler, Args&& ... args_)
             : mailbox(std::make_shared<Mailbox>(scheduler)), object(std::forward<Args>(args_)...) {
+    }
+
+    template<typename U = Object, class... Args, typename std::enable_if<!std::is_constructible<U, ActorRef<U>, Args...>::value>::type * = nullptr>
+    Actor(std::shared_ptr<Mailbox> mailbox_, Args&& ... args_)
+            : mailbox(mailbox_), object(std::forward<Args>(args_)...) {
     }
 
     ~Actor() {
@@ -91,6 +107,9 @@ public:
     }
 
 private:
+    template <typename O>
+    friend class util::Thread;
+    
     std::shared_ptr<Mailbox> mailbox;
     Object object;
 };
