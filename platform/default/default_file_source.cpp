@@ -18,7 +18,7 @@ namespace mbgl {
 
 class DefaultFileSource::Impl {
 public:
-    Impl(ActorRef<Impl> self, std::shared_ptr<FileSource> assetFileSource_, const std::string& cachePath, uint64_t maximumCacheSize)
+    Impl(ActorRef<Impl> self, std::shared_ptr<FileSource> assetFileSource_, std::string cachePath, uint64_t maximumCacheSize)
             : assetFileSource(assetFileSource_)
             , localFileSource(std::make_unique<LocalFileSource>()) {
         // Initialize the Database asynchronously so as to not block Actor creation.

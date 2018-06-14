@@ -86,6 +86,7 @@ const CGFloat MGLSnapshotterMinimumPixelSize = 64;
 
 @implementation MGLMapSnapshotter {
     std::shared_ptr<mbgl::ThreadPool> _mbglThreadPool;
+    std::shared_ptr<mbgl::FileSource> _mbglFileSource;
     std::unique_ptr<mbgl::MapSnapshotter> _mbglMapSnapshotter;
     std::unique_ptr<mbgl::Actor<mbgl::MapSnapshotter::Callback>> _snapshotCallback;
 }
@@ -438,7 +439,7 @@ const CGFloat MGLSnapshotterMinimumPixelSize = 64;
 - (void)setOptions:(MGLMapSnapshotOptions *)options
 {
     _options = options;
-    mbgl::DefaultFileSource *mbglFileSource = [MGLOfflineStorage sharedOfflineStorage].mbglFileSource;
+    _mbglFileSource = std::shared_ptr<mbgl::FileSource>([MGLOfflineStorage sharedOfflineStorage].mbglFileSource);
     _mbglThreadPool = mbgl::sharedThreadPool();
     
     std::string styleURL = std::string([options.styleURL.absoluteString UTF8String]);
@@ -469,7 +470,7 @@ const CGFloat MGLSnapshotterMinimumPixelSize = 64;
     }
     
     // Create the snapshotter
-    _mbglMapSnapshotter = std::make_unique<mbgl::MapSnapshotter>(*mbglFileSource, *_mbglThreadPool, style, size, pixelRatio, cameraOptions, coordinateBounds);
+    _mbglMapSnapshotter = std::make_unique<mbgl::MapSnapshotter>(_mbglFileSource, _mbglThreadPool, style, size, pixelRatio, cameraOptions, coordinateBounds);
 }
 
 @end
