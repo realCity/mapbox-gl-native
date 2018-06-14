@@ -58,16 +58,27 @@ public:
         // up and running.
         std::shared_ptr<Mailbox> mailbox_ = std::make_shared<Mailbox>(noopScheduler);
         mailbox = mailbox_;
+        
+        auto tuple = std::make_tuple(std::forward<Args>(args)...);
 
-        thread = std::thread([&, sharedMailbox = std::move(mailbox_), runningPromise = std::move(running_)] {
+        thread = std::thread([
+            this,
+            name,
+            tuple,
+            sharedMailbox = std::move(mailbox_),
+            runningPromise = std::move(running_)
+        ] {
             platform::setCurrentThreadName(name);
             platform::makeThreadLowPriority();
 
             util::RunLoop loop_(util::RunLoop::Type::New);
             loop = &loop_;
 
-            Actor<Object>* actor = new (&actorStorage) Actor<Object>(std::move(sharedMailbox), std::forward<Args>(args)...);
-
+            Actor<Object>* actor = emplaceActor(
+                std::move(sharedMailbox),
+                std::move(tuple),
+                std::make_index_sequence<std::tuple_size<decltype(tuple)>::value>{});
+            
             // Replace the NoopScheduler on the mailbox with the RunLoop to
             // begin actually processing messages.
             actor->mailbox->setScheduler(this);
@@ -160,6 +171,11 @@ private:
     void schedule(std::weak_ptr<Mailbox> mailbox_) override {
         assert(loop);
         loop->schedule(mailbox_);
+    }
+    
+    template <typename ArgsTuple, std::size_t... I>
+    Actor<Object>* emplaceActor(std::shared_ptr<Mailbox> sharedMailbox, ArgsTuple args, std::index_sequence<I...>) {
+        return new (&actorStorage) Actor<Object>(std::move(sharedMailbox), std::move(std::get<I>(std::forward<ArgsTuple>(args)))...);
     }
 
     NoopScheduler noopScheduler;
