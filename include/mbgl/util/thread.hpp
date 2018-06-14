@@ -19,11 +19,6 @@
 namespace mbgl {
 namespace util {
 
-class NoopScheduler : public Scheduler {
-public:
-    void schedule(std::weak_ptr<Mailbox>) override {}
-};
-
 // Manages a thread with `Object`.
 
 // Upon creation of this object, it launches a thread and creates an object of type `Object`
@@ -49,14 +44,13 @@ public:
         std::unique_ptr<std::promise<void>> running_ = std::make_unique<std::promise<void>>();
         running = running_->get_future();
         
-        // Pre-create a mailbox for this actor, using a NoopScheduler that
-        // leaves the mailbox's queue unconsumed.
-        // Once the RunLoop on the target thread has been created, we'll replace
-        // the NoopScheduler with the RunLoop. Meanwhile, this allows us to
-        // immediately provide ActorRef using this mailbox, with any messages
-        // sent to them being queued in the holding mailbox until the thread is
-        // up and running.
-        std::shared_ptr<Mailbox> mailbox_ = std::make_shared<Mailbox>(noopScheduler);
+        // Pre-create a "holding" mailbox for this actor, whose messages are
+        // guaranteed not to be consumed until we explicitly call start(), which
+        // we'll do on the target thread, once its RunLoop and Object instance
+        // are ready.
+        // Meanwhile, this allows us to immediately provide ActorRef using this
+        // mailbox to queue any messages that come in before the thread is ready.
+        std::shared_ptr<Mailbox> mailbox_ = std::make_shared<Mailbox>();
         mailbox = mailbox_;
         
         auto tuple = std::make_tuple(std::forward<Args>(args)...);
@@ -81,7 +75,7 @@ public:
             
             // Replace the NoopScheduler on the mailbox with the RunLoop to
             // begin actually processing messages.
-            actor->mailbox->setScheduler(this);
+            actor->mailbox->start(this);
 
             runningPromise->set_value();
             
@@ -178,7 +172,6 @@ private:
         return new (&actorStorage) Actor<Object>(std::move(sharedMailbox), std::move(std::get<I>(std::forward<ArgsTuple>(args)))...);
     }
 
-    NoopScheduler noopScheduler;
     std::weak_ptr<Mailbox> mailbox;
     std::aligned_storage<sizeof(Actor<Object>)> actorStorage;
 
