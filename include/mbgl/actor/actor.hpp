@@ -75,7 +75,7 @@ public:
 
     template<typename U = Object, class... Args, typename std::enable_if<!std::is_constructible<U, ActorRef<U>, Args...>::value>::type * = nullptr>
     Actor(std::shared_ptr<Mailbox> mailbox_, Args&& ... args_)
-            : mailbox(mailbox_), object(std::forward<Args>(args_)...) {
+            : mailbox(std::move(mailbox_)), object(std::forward<Args>(args_)...) {
     }
 
     ~Actor() {
