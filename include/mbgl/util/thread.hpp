@@ -49,7 +49,8 @@ public:
         // we'll do on the target thread, once its RunLoop and Object instance
         // are ready.
         // Meanwhile, this allows us to immediately provide ActorRef using this
-        // mailbox to queue any messages that come in before the thread is ready.
+        // mailbox to queue any messages that come in before the thread is
+        // ready. (See actor().)
         std::shared_ptr<Mailbox> mailbox_ = std::make_shared<Mailbox>();
         mailbox = mailbox_;
         
@@ -68,6 +69,8 @@ public:
             util::RunLoop loop_(util::RunLoop::Type::New);
             loop = &loop_;
 
+            // Construct the Actor<Object> into the pre-allocated memory
+            // at `actorStorage`.
             Actor<Object>* actor = emplaceActor(
                 std::move(sharedMailbox),
                 std::move(tuple),
@@ -116,8 +119,8 @@ public:
         // valid until the child thread constructs Actor<Object> into
         // actorStorage using "placement new".
         // We guarantee that the object reference isn't actually used by
-        // using the NoopScheduler to prevent messages to this mailbox from
-        // being processed until after the actor has been constructed.
+        // creating this mailbox without a scheduler, and only starting it
+        // after the actor has been constructed.
         auto actor = reinterpret_cast<Actor<Object>*>(&actorStorage);
         return ActorRef<std::decay_t<Object>>(actor->object, mailbox);
     }
@@ -173,7 +176,7 @@ private:
     }
 
     std::weak_ptr<Mailbox> mailbox;
-    std::aligned_storage<sizeof(Actor<Object>)> actorStorage;
+    std::aligned_storage_t<sizeof(Actor<Object>)> actorStorage;
 
     std::thread thread;
 
