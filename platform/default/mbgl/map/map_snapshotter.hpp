@@ -25,7 +25,7 @@ class Style;
 
 class MapSnapshotter {
 public:
-    MapSnapshotter(std::shared_ptr<FileSource> fileSource,
+    MapSnapshotter(FileSource* fileSource,
                    std::shared_ptr<Scheduler> scheduler,
                    const std::pair<bool, std::string> style,
                    const Size&,

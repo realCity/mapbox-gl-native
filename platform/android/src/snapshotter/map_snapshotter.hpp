@@ -70,7 +70,6 @@ private:
     std::unique_ptr<mbgl::MapSnapshotter> snapshotter;
 
     FileSource *jFileSource;
-    std::shared_ptr<mbgl::FileSource> fileSource;
     void activateFilesource(JNIEnv&);
     void deactivateFilesource(JNIEnv&);
     bool activatedFilesource = false;

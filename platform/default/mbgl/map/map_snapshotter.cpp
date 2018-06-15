@@ -13,7 +13,7 @@ namespace mbgl {
 
 class MapSnapshotter::Impl {
 public:
-    Impl(std::shared_ptr<FileSource>,
+    Impl(FileSource*,
          std::shared_ptr<Scheduler>,
          const std::pair<bool, std::string> style,
          const Size&,
@@ -40,13 +40,12 @@ public:
     void snapshot(ActorRef<MapSnapshotter::Callback>);
 
 private:
-    std::shared_ptr<FileSource> fileSource;
     std::shared_ptr<Scheduler> scheduler;
     HeadlessFrontend frontend;
     Map map;
 };
 
-MapSnapshotter::Impl::Impl(std::shared_ptr<FileSource> fileSource_,
+MapSnapshotter::Impl::Impl(FileSource* fileSource,
            std::shared_ptr<Scheduler> scheduler_,
            const std::pair<bool, std::string> style,
            const Size& size,
@@ -54,8 +53,7 @@ MapSnapshotter::Impl::Impl(std::shared_ptr<FileSource> fileSource_,
            const optional<CameraOptions> cameraOptions,
            const optional<LatLngBounds> region,
            const optional<std::string> programCacheDir)
-    : fileSource(std::move(fileSource_))
-    , scheduler(std::move(scheduler_))
+    : scheduler(std::move(scheduler_))
     , frontend(size, pixelRatio, *fileSource, *scheduler, programCacheDir)
     , map(frontend, MapObserver::nullObserver(), size, pixelRatio, *fileSource, *scheduler, MapMode::Static) {
 
@@ -153,7 +151,7 @@ LatLngBounds MapSnapshotter::Impl::getRegion() const {
     return map.latLngBoundsForCamera(getCameraOptions());
 }
 
-MapSnapshotter::MapSnapshotter(std::shared_ptr<FileSource> fileSource,
+MapSnapshotter::MapSnapshotter(FileSource* fileSource,
                                std::shared_ptr<Scheduler> scheduler,
                                const std::pair<bool, std::string> style,
                                const Size& size,
@@ -161,7 +159,7 @@ MapSnapshotter::MapSnapshotter(std::shared_ptr<FileSource> fileSource,
                                const optional<CameraOptions> cameraOptions,
                                const optional<LatLngBounds> region,
                                const optional<std::string> programCacheDir)
-   : impl(std::make_unique<util::Thread<MapSnapshotter::Impl>>("Map Snapshotter", std::move(fileSource), std::move(scheduler), style, size, pixelRatio, cameraOptions, region, programCacheDir)) {
+   : impl(std::make_unique<util::Thread<MapSnapshotter::Impl>>("Map Snapshotter", fileSource, std::move(scheduler), style, size, pixelRatio, cameraOptions, region, programCacheDir)) {
 }
 
 MapSnapshotter::~MapSnapshotter() = default;
