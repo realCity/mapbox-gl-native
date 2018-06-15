@@ -40,27 +40,18 @@ template<class Object>
 class Thread : public Scheduler {
 public:
     template <class... Args>
-    Thread(const std::string& name, Args&&... args) {
+    Thread(const std::string& name, Args&&... args)
+        : object(std::make_unique<Actor<Object>>()) {
+
         std::unique_ptr<std::promise<void>> running_ = std::make_unique<std::promise<void>>();
         running = running_->get_future();
         
-        // Pre-create a "holding" mailbox for this actor, whose messages are
-        // guaranteed not to be consumed until we explicitly call start(), which
-        // we'll do on the target thread, once its RunLoop and Object instance
-        // are ready.
-        // Meanwhile, this allows us to immediately provide ActorRef using this
-        // mailbox to queue any messages that come in before the thread is
-        // ready. (See actor().)
-        std::shared_ptr<Mailbox> mailbox_ = std::make_shared<Mailbox>();
-        mailbox = mailbox_;
-        
-        auto tuple = std::make_tuple(std::forward<Args>(args)...);
+        auto capturedArgs = Actor<Object>::captureArguments(std::forward<Args>(args)...);
 
         thread = std::thread([
             this,
             name,
-            tuple,
-            sharedMailbox = std::move(mailbox_),
+            capturedArgs,
             runningPromise = std::move(running_)
         ] {
             platform::setCurrentThreadName(name);
@@ -69,16 +60,7 @@ public:
             util::RunLoop loop_(util::RunLoop::Type::New);
             loop = &loop_;
 
-            // Construct the Actor<Object> into the pre-allocated memory
-            // at `actorStorage`.
-            Actor<Object>* actor = emplaceActor(
-                std::move(sharedMailbox),
-                std::move(tuple),
-                std::make_index_sequence<std::tuple_size<decltype(tuple)>::value>{});
-            
-            // Replace the NoopScheduler on the mailbox with the RunLoop to
-            // begin actually processing messages.
-            actor->mailbox->start(this);
+            object->activate(*this, std::move(capturedArgs));
 
             runningPromise->set_value();
             
@@ -100,7 +82,7 @@ public:
         // messages posted on this scheduler after
         // we delete the RunLoop.
         loop->invoke([&] {
-            reinterpret_cast<const Actor<Object>*>(&actorStorage)->~Actor<Object>();
+            object.reset();
             joinable.set_value();
         });
 
@@ -115,14 +97,7 @@ public:
     // to the non-owning reference to outlive this object
     // and be used after the `Thread<>` gets destroyed.
     ActorRef<std::decay_t<Object>> actor() {
-        // The actor->object reference we provide here will not actually be
-        // valid until the child thread constructs Actor<Object> into
-        // actorStorage using "placement new".
-        // We guarantee that the object reference isn't actually used by
-        // creating this mailbox without a scheduler, and only starting it
-        // after the actor has been constructed.
-        auto actor = reinterpret_cast<Actor<Object>*>(&actorStorage);
-        return ActorRef<std::decay_t<Object>>(actor->object, mailbox);
+        return object->self();
     }
 
     // Pauses the `Object` thread. It will prevent the object to wake
@@ -170,13 +145,7 @@ private:
         loop->schedule(mailbox_);
     }
     
-    template <typename ArgsTuple, std::size_t... I>
-    Actor<Object>* emplaceActor(std::shared_ptr<Mailbox> sharedMailbox, ArgsTuple args, std::index_sequence<I...>) {
-        return new (&actorStorage) Actor<Object>(std::move(sharedMailbox), std::move(std::get<I>(std::forward<ArgsTuple>(args)))...);
-    }
-
-    std::weak_ptr<Mailbox> mailbox;
-    std::aligned_storage_t<sizeof(Actor<Object>)> actorStorage;
+    std::unique_ptr<Actor<Object>> object;
 
     std::thread thread;
 

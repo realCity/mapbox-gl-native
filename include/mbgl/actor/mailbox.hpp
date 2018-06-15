@@ -30,7 +30,8 @@ public:
     // Attach the given scheduler to this mailbox and begin processing messages
     // sent to it. The mailbox must be a "holding" mailbox, as created by the
     // default constructor Mailbox().
-    void start(Scheduler* scheduler_);
+    void activate(Scheduler& scheduler_);
+    bool isActive() const;
 
     static void maybeReceive(std::weak_ptr<Mailbox>);
 

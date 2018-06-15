@@ -25,7 +25,7 @@ void Mailbox::close() {
     closed = true;
 }
 
-void Mailbox::start(Scheduler* scheduler_) {
+void Mailbox::activate(Scheduler& scheduler_) {
     assert(!scheduler);
 
     // As with close(), block until neither receive() nor push() are in progress, and acquire the two
@@ -33,7 +33,7 @@ void Mailbox::start(Scheduler* scheduler_) {
     std::lock_guard<std::recursive_mutex> receivingLock(receivingMutex);
     std::lock_guard<std::mutex> pushingLock(pushingMutex);
     
-    scheduler = scheduler_;
+    scheduler = &scheduler_;
 
     if (closed) {
         return;
@@ -43,6 +43,8 @@ void Mailbox::start(Scheduler* scheduler_) {
         (*scheduler)->schedule(shared_from_this());
     }
 }
+
+bool Mailbox::isActive() const { return bool(scheduler); }
 
 
 void Mailbox::push(std::unique_ptr<Message> message) {

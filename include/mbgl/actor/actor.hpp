@@ -53,38 +53,55 @@ namespace util {
 template <class Object>
 class Actor : public util::noncopyable {
 public:
+    // TODO: handle std::reference_wrapper case like make_tuple does.
+    template <class... Args>
+    using Arguments = std::tuple<std::decay_t<Args>...>;
 
-    // Enabled for Objects with a constructor taking ActorRef<Object> as the first parameter
-    template <typename U = Object, class... Args, typename std::enable_if<std::is_constructible<U, ActorRef<U>, Args...>::value>::type * = nullptr>
-    Actor(Scheduler& scheduler, Args&&... args_)
-            : mailbox(std::make_shared<Mailbox>(scheduler)),
-              object(self(), std::forward<Args>(args_)...) {
+    template <class... Args>
+    static Arguments<Args...> captureArguments(Args&&... args) {
+        return std::make_tuple(std::forward<Args>(args)...);
     }
 
-    template <typename U = Object, class... Args, typename std::enable_if<std::is_constructible<U, ActorRef<U>, Args...>::value>::type * = nullptr>
-    Actor(std::shared_ptr<Mailbox> mailbox_, Args&&... args_)
-            : mailbox(std::move(mailbox_)),
-              object(self(), std::forward<Args>(args_)...) {
+    // Target thread constructor: constructs the Object synchronously and
+    // immediately begins processing messages to it.
+    template<class... Args>
+    Actor(Scheduler& scheduler, Args&& ... args) : mailbox(std::make_shared<Mailbox>()) {
+        emplaceObject(std::forward<Args>(args)...);
+        mailbox->activate(scheduler);
     }
 
-    // Enabled for plain Objects
-    template<typename U = Object, class... Args, typename std::enable_if<!std::is_constructible<U, ActorRef<U>, Args...>::value>::type * = nullptr>
-    Actor(Scheduler& scheduler, Args&& ... args_)
-            : mailbox(std::make_shared<Mailbox>(scheduler)), object(std::forward<Args>(args_)...) {
-    }
+    // Parent thread constructor, allowing an Actor to be pre-created on a
+    // parent thread before its target thread is up and running.
+    // This constructor:
+    // * does not construct an Object
+    // * pre-creates a "holding" mailbox, whose messages are guaranteed not to
+    //   be consumed until we explicitly call start().
+    //
+    // An Actor created in this manner must be manually activated by a call to
+    // activate() from the target thread, at which point the Object is
+    // constructed and the Mailbox starts being consumed.
+    //
+    // Meanwhile, this allows us to immediately provide ActorRefs to which
+    // messages can safely be sent, since we won't process those messages
+    // until their target object is in place.
+    Actor() : mailbox(std::make_shared<Mailbox>()) {}
 
-    template<typename U = Object, class... Args, typename std::enable_if<!std::is_constructible<U, ActorRef<U>, Args...>::value>::type * = nullptr>
-    Actor(std::shared_ptr<Mailbox> mailbox_, Args&& ... args_)
-            : mailbox(std::move(mailbox_)), object(std::forward<Args>(args_)...) {
+    template <class ArgsTuple>
+    void activate(Scheduler& scheduler, ArgsTuple&& args) {
+        emplaceObject(args, std::make_index_sequence<std::tuple_size<ArgsTuple>::value>{});
+        mailbox->activate(scheduler);
     }
-
+    
     ~Actor() {
         mailbox->close();
+        if (initialized) {
+            (&object())->~Object();
+        }
     }
 
     template <typename Fn, class... Args>
     void invoke(Fn fn, Args&&... args) {
-        mailbox->push(actor::makeMessage(object, fn, std::forward<Args>(args)...));
+        mailbox->push(actor::makeMessage(object(), fn, std::forward<Args>(args)...));
     }
 
     template <typename Fn, class... Args>
@@ -94,24 +111,48 @@ public:
 
         std::promise<ResultType> promise;
         auto future = promise.get_future();
-        mailbox->push(actor::makeMessage(std::move(promise), object, fn, std::forward<Args>(args)...));
+        mailbox->push(actor::makeMessage(std::move(promise), object(), fn, std::forward<Args>(args)...));
         return future;
     }
 
     ActorRef<std::decay_t<Object>> self() {
-        return ActorRef<std::decay_t<Object>>(object, mailbox);
+        return ActorRef<std::decay_t<Object>>(object(), mailbox);
     }
 
     operator ActorRef<std::decay_t<Object>>() {
         return self();
     }
-
-private:
-    template <typename O>
-    friend class util::Thread;
     
+private:
     std::shared_ptr<Mailbox> mailbox;
-    Object object;
+    std::aligned_storage_t<sizeof(Object)> objectStorage;
+    std::atomic<bool> initialized { false };
+    
+    Object& object() {
+        assert(initialized || !mailbox->isActive());
+        return *reinterpret_cast<Object *>(&objectStorage);
+    }
+
+    // Enabled for Objects with a constructor taking ActorRef<Object> as the first parameter
+    template <typename U = Object, class... Args, typename std::enable_if<std::is_constructible<U, ActorRef<U>, Args...>::value>::type * = nullptr>
+    void emplaceObject(Args&&... args_) {
+        new (&objectStorage) Object(self(), std::forward<Args>(args_)...);
+        initialized = true;
+    }
+
+    // Enabled for plain Objects
+    template<typename U = Object, class... Args, typename std::enable_if<!std::is_constructible<U, ActorRef<U>, Args...>::value>::type * = nullptr>
+    void emplaceObject(Args&&... args_) {
+        new (&objectStorage) Object(std::forward<Args>(args_)...);
+        initialized = true;
+    }
+    
+    // Used to expand a tuple of arguments created by Actor<Object>::captureArguments()
+    template<class ArgsTuple, std::size_t... I>
+    void emplaceObject(ArgsTuple args, std::index_sequence<I...>) {
+        emplaceObject(std::move(std::get<I>(std::forward<ArgsTuple>(args)))...);
+    }
+
 };
 
 } // namespace mbgl
