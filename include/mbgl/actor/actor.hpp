@@ -8,13 +8,9 @@
 #include <memory>
 #include <future>
 #include <type_traits>
+#include <cassert>
 
 namespace mbgl {
-
-namespace util {
-    template <typename O>
-    class Thread;
-}
 
 /*
     An `Actor<O>` is an owning reference to an asynchronous object of type `O`: an "actor".
