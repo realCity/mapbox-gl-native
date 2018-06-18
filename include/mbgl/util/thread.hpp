@@ -43,8 +43,8 @@ public:
     Thread(const std::string& name, Args&&... args)
         : object(std::make_unique<Actor<Object>>()) {
 
-        std::unique_ptr<std::promise<void>> running_ = std::make_unique<std::promise<void>>();
-        running = running_->get_future();
+        std::promise<void> running_;
+        running = running_.get_future();
         
         auto capturedArgs = Actor<Object>::captureArguments(std::forward<Args>(args)...);
 
@@ -53,7 +53,7 @@ public:
             name,
             capturedArgs,
             runningPromise = std::move(running_)
-        ] {
+        ] () mutable {
             platform::setCurrentThreadName(name);
             platform::makeThreadLowPriority();
 
@@ -62,7 +62,7 @@ public:
 
             object->activate(loop_, std::move(capturedArgs));
 
-            runningPromise->set_value();
+            runningPromise.set_value();
             
             loop->run();
             loop = nullptr;
