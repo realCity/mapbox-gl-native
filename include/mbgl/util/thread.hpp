@@ -37,7 +37,7 @@ namespace util {
 // - `Object` can use `Timer` and do asynchronous I/O, like wait for sockets events.
 //
 template<class Object>
-class Thread : public Scheduler {
+class Thread {
 public:
     template <class... Args>
     Thread(const std::string& name, Args&&... args)
@@ -60,7 +60,7 @@ public:
             util::RunLoop loop_(util::RunLoop::Type::New);
             loop = &loop_;
 
-            object->activate(*this, std::move(capturedArgs));
+            object->activate(loop_, std::move(capturedArgs));
 
             runningPromise->set_value();
             
@@ -69,7 +69,7 @@ public:
         });
     }
 
-    ~Thread() override {
+    ~Thread() {
         if (paused) {
             resume();
         }
@@ -140,11 +140,6 @@ public:
 private:
     MBGL_STORE_THREAD(tid);
 
-    void schedule(std::weak_ptr<Mailbox> mailbox_) override {
-        assert(loop);
-        loop->schedule(mailbox_);
-    }
-    
     std::unique_ptr<Actor<Object>> object;
 
     std::thread thread;
