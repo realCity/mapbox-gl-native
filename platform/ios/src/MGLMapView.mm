@@ -4674,7 +4674,7 @@ public:
 {
     _locationManager = locationManager;
     _locationManager.delegate = self;
-    [self validateLocationServices];
+    
 }
 
 - (void)validateLocationServices
