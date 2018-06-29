@@ -1,6 +1,12 @@
 # Changelog for Mapbox Maps SDK for macOS
 
- ## 0.7.2 - June 22, 2018
+## master
+
+### Other changes
+
+* Added `-[MGLMapSnapshot coordinateForPoint:]` that returns a map coordinate for a specified snapshot image point. Fixed a bug in `-[MGLMapShapshot pointForCoordinate:]` where incorrect points were returned. ([#12221](https://github.com/mapbox/mapbox-gl-native/pull/12221))
+
+## 0.7.2 - June 22, 2018
 
 * Fixed a crash in `-[MGLStyle localizeLabelsIntoLocale:]` on macOS 10.11. ([#12123](https://github.com/mapbox/mapbox-gl-native/pull/12123))
 * Improved compatibility with Mapbox China APIs. ([#11845](https://github.com/mapbox/mapbox-gl-native/pull/11845))
