@@ -1,4 +1,5 @@
 #include <mbgl/style/expression/dsl.hpp>
+#include <mbgl/style/expression/error.hpp>
 #include <mbgl/style/expression/literal.hpp>
 #include <mbgl/style/expression/assertion.hpp>
 #include <mbgl/style/expression/coercion.hpp>
@@ -26,6 +27,10 @@ static std::unique_ptr<Expression> compound(const char* op, Args... args) {
     ParseResult result =  createCompoundExpression(op, vec(std::move(args)...), ctx);
     assert(result);
     return std::move(*result);
+}
+
+std::unique_ptr<Expression> error(std::string message) {
+    return std::make_unique<Error>(std::move(message));
 }
 
 std::unique_ptr<Expression> literal(const char* value) {

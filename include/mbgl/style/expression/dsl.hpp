@@ -5,6 +5,7 @@
 #include <mbgl/style/expression/interpolator.hpp>
 
 #include <memory>
+#include <string>
 #include <initializer_list>
 
 namespace mbgl {
@@ -14,6 +15,8 @@ namespace dsl {
 
 // This convenience API does little to no expression validation or type-checking, and is intended for
 // use only by test and other non-production code.
+
+std::unique_ptr<Expression> error(std::string);
 
 std::unique_ptr<Expression> literal(const char* value);
 std::unique_ptr<Expression> literal(Value value);
