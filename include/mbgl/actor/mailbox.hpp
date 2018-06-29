@@ -22,16 +22,16 @@ public:
     
     Mailbox(Scheduler&);
 
-    void push(std::unique_ptr<Message>);
-
-    void close();
-    void receive();
-    
     // Attach the given scheduler to this mailbox and begin processing messages
     // sent to it. The mailbox must be a "holding" mailbox, as created by the
     // default constructor Mailbox().
-    void activate(Scheduler& scheduler_);
-    bool isActive() const;
+    void open(Scheduler& scheduler_);
+    void close();
+
+    bool isOpen() const;
+
+    void push(std::unique_ptr<Message>);
+    void receive();
 
     static void maybeReceive(std::weak_ptr<Mailbox>);
 

@@ -12,6 +12,99 @@
 
 namespace mbgl {
 
+template <class Object>
+class EstablishedActor;
+
+template <class Object>
+class Actor;
+
+template <class Object>
+class AspiringActor {
+public:
+    AspiringActor() : mailbox(std::make_shared<Mailbox>()) {
+        assert(!mailbox->isOpen());
+    }
+    
+    AspiringActor(const AspiringActor&) = delete;
+    
+    ActorRef<std::decay_t<Object>> self() {
+        return ActorRef<std::decay_t<Object>>(object(), mailbox);
+    }
+    
+    template <typename Fn, class... Args>
+    void invoke(Fn fn, Args&&... args) {
+        mailbox->push(actor::makeMessage(object(), fn, std::forward<Args>(args)...));
+    }
+
+    template <typename Fn, class... Args>
+    auto ask(Fn fn, Args&&... args) {
+        // Result type is deduced from the function's return type
+        using ResultType = typename std::result_of<decltype(fn)(Object, Args...)>::type;
+
+        std::promise<ResultType> promise;
+        auto future = promise.get_future();
+        mailbox->push(actor::makeMessage(std::move(promise), object(), fn, std::forward<Args>(args)...));
+        return future;
+    }
+
+private:
+    std::shared_ptr<Mailbox> mailbox;
+    std::aligned_storage_t<sizeof(Object)> objectStorage;
+    
+    Object& object() {
+        return *reinterpret_cast<Object *>(&objectStorage);
+    }
+    
+    friend class EstablishedActor<Object>;
+    friend class Actor<Object>;
+};
+
+template <class Object>
+class EstablishedActor {
+public:
+    template <class... Args>
+    EstablishedActor(Scheduler& scheduler, AspiringActor<Object>& parent_, Args&& ... args)
+    :   parent(parent_) {
+        emplaceObject(std::forward<Args>(args)...);
+        parent.mailbox->open(scheduler);
+    }
+
+    template <class ArgsTuple, std::size_t ArgCount = std::tuple_size<ArgsTuple>::value>
+    EstablishedActor(Scheduler& scheduler, AspiringActor<Object>& parent_, ArgsTuple&& args)
+    :   parent(parent_) {
+        emplaceObject(std::forward<ArgsTuple>(args), std::make_index_sequence<ArgCount>{});
+        parent.mailbox->open(scheduler);
+    }
+    
+    EstablishedActor(const EstablishedActor&) = delete;
+
+    ~EstablishedActor() {
+        parent.mailbox->close();
+        parent.object().~Object();
+    }
+    
+private:
+    // Enabled for Objects with a constructor taking ActorRef<Object> as the first parameter
+    template <typename U = Object, class... Args, typename std::enable_if<std::is_constructible<U, ActorRef<U>, Args...>::value>::type * = nullptr>
+    void emplaceObject(Args&&... args_) {
+        new (&parent.objectStorage) Object(parent.self(), std::forward<Args>(args_)...);
+    }
+
+    // Enabled for plain Objects
+    template <typename U = Object, class... Args, typename std::enable_if<!std::is_constructible<U, ActorRef<U>, Args...>::value>::type * = nullptr>
+    void emplaceObject(Args&&... args_) {
+        new (&parent.objectStorage) Object(std::forward<Args>(args_)...);
+    }
+    
+    // Used to expand a tuple of arguments created by Actor<Object>::captureArguments()
+    template <class ArgsTuple, std::size_t... I>
+    void emplaceObject(ArgsTuple args, std::index_sequence<I...>) {
+        emplaceObject(std::move(std::get<I>(std::forward<ArgsTuple>(args)))...);
+    }
+
+    AspiringActor<Object>& parent;
+};
+
 /*
     An `Actor<O>` is an owning reference to an asynchronous object of type `O`: an "actor".
     Communication with an actor happens via message passing: you send a message to the object
@@ -45,110 +138,36 @@ namespace mbgl {
     Please don't send messages that contain shared pointers or references. That subverts the
     purpose of the actor model: prohibiting direct concurrent access to shared state.
 */
-
 template <class Object>
-class Actor : public util::noncopyable {
+class Actor {
 public:
-    // TODO: handle std::reference_wrapper case like make_tuple does.
     template <class... Args>
-    using Arguments = std::tuple<std::decay_t<Args>...>;
+    Actor(Scheduler& scheduler, Args&&... args)
+        : target(scheduler, parent, std::forward<Args>(args)...) {}
 
-    template <class... Args>
-    static Arguments<Args...> captureArguments(Args&&... args) {
-        return std::make_tuple(std::forward<Args>(args)...);
-    }
-
-    // Target thread constructor: constructs the Object synchronously and
-    // immediately begins processing messages to it.
-    template<class... Args>
-    Actor(Scheduler& scheduler, Args&& ... args) : mailbox(std::make_shared<Mailbox>()) {
-        emplaceObject(std::forward<Args>(args)...);
-        mailbox->activate(scheduler);
-    }
-
-    // Parent thread constructor, allowing an Actor to be pre-created on a
-    // parent thread before its target thread is up and running.
-    // This constructor:
-    // * does not construct an Object
-    // * pre-creates a "holding" mailbox, whose messages are guaranteed not to
-    //   be consumed until we explicitly call start().
-    //
-    // An Actor created in this manner must be manually activated by a call to
-    // activate() from the target thread, at which point the Object is
-    // constructed and the Mailbox starts being consumed.
-    //
-    // Meanwhile, this allows us to immediately provide ActorRefs to which
-    // messages can safely be sent, since we won't process those messages
-    // until their target object is in place.
-    Actor() : mailbox(std::make_shared<Mailbox>()) {}
-
-    template <class ArgsTuple>
-    void activate(Scheduler& scheduler, ArgsTuple&& args) {
-        emplaceObject(args, std::make_index_sequence<std::tuple_size<ArgsTuple>::value>{});
-        mailbox->activate(scheduler);
-    }
-    
-    ~Actor() {
-        mailbox->close();
-        if (initialized) {
-            (&object())->~Object();
-        }
-    }
-
-    template <typename Fn, class... Args>
-    void invoke(Fn fn, Args&&... args) {
-        mailbox->push(actor::makeMessage(object(), fn, std::forward<Args>(args)...));
-    }
-
-    template <typename Fn, class... Args>
-    auto ask(Fn fn, Args&&... args) {
-        // Result type is deduced from the function's return type
-        using ResultType = typename std::result_of<decltype(fn)(Object, Args...)>::type;
-
-        std::promise<ResultType> promise;
-        auto future = promise.get_future();
-        mailbox->push(actor::makeMessage(std::move(promise), object(), fn, std::forward<Args>(args)...));
-        return future;
-    }
+    Actor(const Actor&) = delete;
 
     ActorRef<std::decay_t<Object>> self() {
-        return ActorRef<std::decay_t<Object>>(object(), mailbox);
+        return parent.self();
     }
 
     operator ActorRef<std::decay_t<Object>>() {
         return self();
     }
-    
+
+    template <typename Fn, class... Args>
+    void invoke(Fn fn, Args&&... args) {
+        parent.invoke(std::move(fn), std::forward<Args>(args)...);
+    }
+
+    template <typename Fn, class... Args>
+    auto ask(Fn fn, Args&&... args) {
+        return parent.ask(std::move(fn), std::forward<Args>(args)...);
+    }
+
 private:
-    std::shared_ptr<Mailbox> mailbox;
-    std::aligned_storage_t<sizeof(Object)> objectStorage;
-    std::atomic<bool> initialized { false };
-    
-    Object& object() {
-        assert(initialized || !mailbox->isActive());
-        return *reinterpret_cast<Object *>(&objectStorage);
-    }
-
-    // Enabled for Objects with a constructor taking ActorRef<Object> as the first parameter
-    template <typename U = Object, class... Args, typename std::enable_if<std::is_constructible<U, ActorRef<U>, Args...>::value>::type * = nullptr>
-    void emplaceObject(Args&&... args_) {
-        new (&objectStorage) Object(self(), std::forward<Args>(args_)...);
-        initialized = true;
-    }
-
-    // Enabled for plain Objects
-    template<typename U = Object, class... Args, typename std::enable_if<!std::is_constructible<U, ActorRef<U>, Args...>::value>::type * = nullptr>
-    void emplaceObject(Args&&... args_) {
-        new (&objectStorage) Object(std::forward<Args>(args_)...);
-        initialized = true;
-    }
-    
-    // Used to expand a tuple of arguments created by Actor<Object>::captureArguments()
-    template<class ArgsTuple, std::size_t... I>
-    void emplaceObject(ArgsTuple args, std::index_sequence<I...>) {
-        emplaceObject(std::move(std::get<I>(std::forward<ArgsTuple>(args)))...);
-    }
-
+    AspiringActor<Object> parent;
+    EstablishedActor<Object> target;
 };
 
 } // namespace mbgl

@@ -40,18 +40,17 @@ template<class Object>
 class Thread {
 public:
     template <class... Args>
-    Thread(const std::string& name, Args&&... args)
-        : object(std::make_unique<Actor<Object>>()) {
+    Thread(const std::string& name, Args&&... args) {
 
         std::promise<void> running_;
         running = running_.get_future();
-        
-        auto capturedArgs = Actor<Object>::captureArguments(std::forward<Args>(args)...);
+
+        auto capturedArgs = std::make_tuple(std::forward<Args>(args)...);
 
         thread = std::thread([
             this,
             name,
-            capturedArgs,
+            capturedArgs = std::move(capturedArgs),
             runningPromise = std::move(running_)
         ] () mutable {
             platform::setCurrentThreadName(name);
@@ -59,8 +58,7 @@ public:
 
             util::RunLoop loop_(util::RunLoop::Type::New);
             loop = &loop_;
-
-            object->activate(loop_, std::move(capturedArgs));
+            EstablishedActor<Object> actor(loop_, object, std::move(capturedArgs));
 
             runningPromise.set_value();
             
@@ -74,19 +72,17 @@ public:
             resume();
         }
 
-        std::promise<void> joinable;
+        std::promise<void> stoppable;
         
         running.wait();
 
-        // Kill the actor, so we don't get more
-        // messages posted on this scheduler after
-        // we delete the RunLoop.
+        // Invoke a noop task on the run loop to ensure that we're executing
+        // run() before we call stop()
         loop->invoke([&] {
-            object.reset();
-            joinable.set_value();
+            stoppable.set_value();
         });
 
-        joinable.get_future().get();
+        stoppable.get_future().get();
 
         loop->stop();
         thread.join();
@@ -97,7 +93,7 @@ public:
     // to the non-owning reference to outlive this object
     // and be used after the `Thread<>` gets destroyed.
     ActorRef<std::decay_t<Object>> actor() {
-        return object->self();
+        return object.self();
     }
 
     // Pauses the `Object` thread. It will prevent the object to wake
@@ -140,7 +136,7 @@ public:
 private:
     MBGL_STORE_THREAD(tid);
 
-    std::unique_ptr<Actor<Object>> object;
+    AspiringActor<Object> object;
 
     std::thread thread;
 
