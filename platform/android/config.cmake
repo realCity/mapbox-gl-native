@@ -85,7 +85,7 @@ macro(mbgl_platform_core)
         PRIVATE platform/android
     )
 
-    mbgl_nunicode_core()
+    target_link_libraries(mbgl-core PRIVATE nunicode)
 
     target_add_mason_package(mbgl-core PUBLIC geojson)
     target_add_mason_package(mbgl-core PUBLIC jni.hpp)

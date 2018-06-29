@@ -89,7 +89,7 @@ macro(mbgl_platform_core)
         PRIVATE platform/linux
     )
 
-    mbgl_nunicode_core()
+    target_link_libraries(mbgl-core PRIVATE nunicode)
 
     target_add_mason_package(mbgl-core PUBLIC libpng)
     target_add_mason_package(mbgl-core PUBLIC libjpeg-turbo)

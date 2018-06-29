@@ -50,7 +50,7 @@ macro(mbgl_platform_core)
         target_sources(mbgl-core PRIVATE platform/qt/src/bidi.cpp)
     endif()
 
-    mbgl_nunicode_core()
+    target_link_libraries(mbgl-core PRIVATE nunicode)
 
     target_sources(mbgl-core PRIVATE platform/default/collator.cpp)
     target_sources(mbgl-core PRIVATE platform/default/local_glyph_rasterizer.cpp)
